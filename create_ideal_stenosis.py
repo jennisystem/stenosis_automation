@@ -3,7 +3,7 @@ import sys
 import math
 import numpy as np
 import sv
-sys.path.append("C:/users/Emmaline/Downloads")
+sys.path.append("D:\\1_CS\\jenn\\stenosis_research")
 import helper_functions
 sys.path.pop()
 
@@ -38,6 +38,7 @@ segmentations_name = model_name + "_segmentations"
 ############################################################
 ############################################################
 ############################################################
+
 
 def generate_points_list(x0, xf, nx, distance, f=None, g=None, h=None):
     # make path points list
@@ -99,13 +100,15 @@ def generate_model(args):
     sv.dmg.add_segmentation(name = segmentations_name, path = path_name, segmentations = segmentations)
 
 
-# Dictionary of ranges in format (start, end, step), such that range is x in [start, end] and x = start+k*step, k in Z+
+
+
+# List of ranges in format (start, end, step), such that range is x in [start, end] and x = start+k*step, k in Z+
 ranges = [
     (-15.0, -15.0, 1.0),    # x0
     (15.0, 15.0, 1.0),      # xf
     (31, 31, 2),            # nx - make this an odd number, so that we will have a segmentation at the midpoint
     (0, 0, 1),              # distance - for removal of segmentations surrounding the midsection
-    (15.0, 17.0, 1.0),      # midsection_percentage - midsection area as a percentage of the inlet area 
+    10**np.arange(-1,2.1,0.5),      # midsection_percentage - midsection area as a percentage of the inlet area (Logarithmic scale between 0.1% and 100%)
     (1.0, 1.0, 0.1),        # radius_inlet
     (50, 100, 25),          # sigma - controls the spread of the stenosis/aneurysm
     (0.0, 0.0, 0.25)        # mu - controls the center of the stenosis/aneurysm
@@ -114,34 +117,48 @@ ranges = [
 
 # Parametric function of path's x-axis component
 def f(x):
-    # return 0  # Zero for straight path
+    return 0  # Zero for straight path
     return 0 if x > 0 else (x/15) ** 2
 
 # Parametric function of path's y-axis component
 def g(y):
-    # return 0  # Zero for straight path
+    return 0  # Zero for straight path
     return y/3 if y < 0 else y
 
 # Radius function
 def r(radius_inlet, x, A, sigma, mu):
-    arr = np.array([(x_i if x_i > 0 else x_i*2) for x_i in x])
+    arr = np.array([(x_i if x_i > 0 else x_i**2) for x_i in x])
     return radius(radius_inlet, arr, A, sigma, mu)
 
 
 def generate_simulation_inputs(range_index = (len(ranges)-1)):
+    # Base case, no variables in list to generate combinations -- return empty list
     if(range_index < 0):
         yield []
+    # Recursive case, combinations next variable in list and yield to callee
     else:
-        fromVal, toVal, step = ranges[range_index]
-        
-        for arr in generate_simulation_inputs(range_index-1):
-            val = fromVal
-            while val <= toVal:
-                arr_new = arr.copy()
-                arr_new.append(val)
-                yield arr_new
-                val += step
-
+        # If a tuple is given, then (from, to, step) is given
+        if isinstance(ranges[range_index], tuple):
+            # Extract from, to and step of range
+            fromVal, toVal, step = ranges[range_index]
+            
+            # For each prior sub-combinations, create one copy for each value in range
+            for arr in generate_simulation_inputs(range_index-1):
+                val = fromVal
+                while val <= toVal:
+                    arr_new = arr.copy()
+                    arr_new.append(val)
+                    yield arr_new
+                    val += step  # Increment value by step
+        # Otherwise, a range of values is given directly
+        else:
+            # For each prior sub-combinations, create one copy for each value in range
+            for arr in generate_simulation_inputs(range_index-1):
+                for val in ranges[range_index]:  # Extract values from range
+                    arr_new = arr.copy()
+                    arr_new.append(val)
+                    yield arr_new
+            
     
 def run_simulation():
     i = 1
@@ -158,7 +175,6 @@ def run_simulation():
 
 
 run_simulation()
-# generate_points_list(x0, xf, nx, distance, f, g)
 
 
 
