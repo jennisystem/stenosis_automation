@@ -24,6 +24,7 @@ sys.path.pop()
 
 
 # Source: adapted from https://github.com/neilbalch/SimVascular-pythondemos/blob/master/contour_to_lofted_model.py
+# Credit: adapted from original script by Jonathan Pham
 
 def radius(radius_inlet, x, A, sigma, mu):
     # Reference: Sun, L., Gao, H., Pan, S. & Wang, J. X. Surrogate modeling for fluid flows based on physics-constrained deep learning without simulation data. Computer Methods in Applied Mechanics and Engineering 361, (2020).
@@ -73,6 +74,7 @@ def generate_points_list(x0, xf, nx, distance, f=None, g=None, h=None, f_params=
     x = np.array([f(x_i, f_params) for x_i in x]) if (f is not None) else (x * 0)
     y = np.array([g(y_i, g_params) for y_i in y]) if (g is not None) else (y * 0)
     z = np.array([h(z_i, h_params) for z_i in z]) if (h is not None) else z
+
 
     path_points_array = np.column_stack((x, y, z))
     # print(path_points_array)
