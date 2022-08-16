@@ -5,7 +5,7 @@ import numpy as np
 import sv
 
 # Initialize path names
-projDir = "C:\\Websites\\stenosis_research"
+projDir = "C:/users/Emmaline/Downloads"
 
 modelsDir = os.path.join(projDir, 'model')
 pathsDir = os.path.join(projDir, 'paths')
@@ -24,7 +24,6 @@ sys.path.pop()
 
 
 # Source: adapted from https://github.com/neilbalch/SimVascular-pythondemos/blob/master/contour_to_lofted_model.py
-# Credit: adapted from original script by Jonathan Pham
 
 def radius(radius_inlet, x, A, sigma, mu):
     # Reference: Sun, L., Gao, H., Pan, S. & Wang, J. X. Surrogate modeling for fluid flows based on physics-constrained deep learning without simulation data. Computer Methods in Applied Mechanics and Engineering 361, (2020).
@@ -75,7 +74,6 @@ def generate_points_list(x0, xf, nx, distance, f=None, g=None, h=None, f_params=
     y = np.array([g(y_i, g_params) for y_i in y]) if (g is not None) else (y * 0)
     z = np.array([h(z_i, h_params) for z_i in z]) if (h is not None) else z
 
-
     path_points_array = np.column_stack((x, y, z))
     # print(path_points_array)
 
@@ -94,6 +92,12 @@ def generate_radii_list(midsection_percentage, radius_inlet, sigma, mu, z, radiu
     radii_list = radius_array.tolist()
     return radii_list
 
+
+#########################################
+# DEFINE THE NUMBER OF CAPS YOU EXPECT FOR
+# THE TOTAL MODEL (INLETS + OUTLETS)
+NUM_CAPS = 2
+#########################################
 
 
 def generate_model(args):
@@ -120,13 +124,87 @@ def generate_model(args):
 
     segmentPolydata = [obj.get_polydata() for obj in sv.dmg.get_segmentations(segmentations_name)]
 
-    capped_vessels = create_vessels([segmentPolydata,])
-    unioned_model = union_all(capped_vessels)
-    #unioned_model = capped_vessels[0]
-    model = sv.modeling.PolyData()
-    tmp = unioned_model.get_polydata()
-    print("done unioning")
-    sv.dmg.add_model(name = model_name + "_model", model = unioned_model)
+
+    # [=== Create model ===]
+    contour_list = [segmentPolydata,]
+    capped_vessels = create_vessels(contour_list=contour_list)
+    # unioned_model = union_all(capped_vessels)
+    unioned_model = capped_vessels[0]
+    # model = sv.modeling.PolyData()
+    model = clean(unioned_model)
+    model = norm(model)
+    tmp = model.get_polydata()
+    sv.dmg.add_model(name = model_name + "_model", model = model)
+
+
+    # [=== Combine faces ===]
+    model.set_surface(tmp)
+    model.compute_boundary_faces(45)
+    caps = model.identify_caps()
+    ids = model.get_face_ids()
+    walls = [ids[i] for i,x in enumerate(caps) if not x]
+    '''while len(walls) > 1:
+        target = walls[0]
+        lose = walls[1]
+        combined = sv.mesh_utils.remesh_faces(model.get_polydata(),[target],lose)
+        model.set_surface(combined)
+        ids = model.get_face_ids()
+        caps = model.identify_caps()
+        walls = [ids[i] for i,x in enumerate(caps) if not x]
+        print(walls)
+    ids = model.get_face_ids()'''
+    cco8_model_name = model_name + '_CC0_8'
+    if True:
+        sv.dmg.add_model(cco8_model_name, model)
+    '''if len(ids) > NUM_CAPS:
+        face_cells = []
+        for idx in ids:
+            face = model.get_face_polydata(idx)
+            cells = face.GetNumberOfCells()
+            print(cells)
+            face_cells.append(cells)
+        data_to_remove = len(ids) - NUM_CAPS
+        remove_list = []
+        for i in range(data_to_remove):
+            remove_list.append(ids[face_cells.index(min(face_cells))])
+            face_cells[face_cells.index(min(face_cells))] += 1000
+        print(remove_list)
+        while len(remove_list) > 0:
+            target = walls[0]
+            lose = remove_list.pop(-1)
+            combined = sv.mesh_utils.remesh_faces(model.get_polydata(),[target],lose)
+            model.set_surface(combined)
+            print(remove_list)
+        print(model.get_face_ids())'''
+    ###############################
+    # LOCAL SMOOTHING (not included)
+    ###############################
+    #smoothing_params = {'method':'constrained', 'num_iterations':5, 'constrain_factor':0.2, 'num_cg_solves':30}
+    smooth_model = model.get_polydata()
+    for idx, contour_set in enumerate(contour_list):
+         if idx == 0:
+              continue
+         smoothing_params = {'method':'constrained', 'num_iterations':3, 'constrain_factor':0.1+(0.9*(1-contour_set[0].get_radius()/contour_list[0][0].get_radius())), 'num_cg_solves':30}
+         smooth_model = sv.geometry.local_sphere_smooth(smooth_model,contour_set[0].get_radius()*2,contour_set[0].get_center(),smoothing_params)
+         print('local sphere smoothing {}'.format(idx))
+    model.set_surface(smooth_model)
+
+    # [=== Create mesh ===]
+    faces = model.get_face_ids()
+    mesher = sv.meshing.create_mesher(sv.meshing.Kernel.TETGEN)
+    GLOBAL_EDGE_SIZE = 0.1  # 0.01 for production
+    tet_options = sv.meshing.TetGenOptions(GLOBAL_EDGE_SIZE,True,True)
+    tet_options.no_merge = False
+    tet_options.optimization = 5
+    tet_options.minimum_dihedral_angle = 18.0
+    mesher.set_model(model)
+    mesher.set_walls(walls)
+    mesher.generate_mesh(tet_options)
+    msh = mesher.get_mesh()
+    if True:
+        sv.dmg.add_mesh(cco8_model_name+'_mesh', msh, cco8_model_name)
+
+    return msh, model
 
 
 
@@ -223,7 +301,7 @@ def run_simulation():
         
         args = (model_name, *input_arr)
 
-        generate_model(args)
+        msh, model = generate_model(args)
         
         i += 1
 
