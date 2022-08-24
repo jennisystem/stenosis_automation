@@ -3,15 +3,21 @@ import sys
 import math
 import numpy as np
 import sv
+import pickle
+
+# pathplanning.Path
+# sv.pathplanning.Path
 
 # Initialize path names
-projDir = "C:/users/Emmaline/Downloads"
+projDir = "C:/Users/Emmaline/Desktop/Marsden Lab/stenosis_automation"
 
+meshDir = os.path.join(projDir, 'mesh')
 modelsDir = os.path.join(projDir, 'model')
 pathsDir = os.path.join(projDir, 'paths')
 segDir = os.path.join(projDir, 'segments')
 
 # Create paths if does not exist
+os.makedirs(meshDir, exist_ok=True)
 os.makedirs(modelsDir, exist_ok=True)
 os.makedirs(pathsDir, exist_ok=True)
 os.makedirs(segDir, exist_ok=True)
@@ -22,8 +28,10 @@ import helper_functions
 from SV_lofting_solids_meshing import *
 sys.path.pop()
 
+sys.path.append('sv')
 
 # Source: adapted from https://github.com/neilbalch/SimVascular-pythondemos/blob/master/contour_to_lofted_model.py
+# Credit: adapted from original script by Jonathan Pham
 
 def radius(radius_inlet, x, A, sigma, mu):
     # Reference: Sun, L., Gao, H., Pan, S. & Wang, J. X. Surrogate modeling for fluid flows based on physics-constrained deep learning without simulation data. Computer Methods in Applied Mechanics and Engineering 361, (2020).
@@ -156,38 +164,38 @@ def generate_model(args):
     cco8_model_name = model_name + '_CC0_8'
     if True:
         sv.dmg.add_model(cco8_model_name, model)
+
+    # Remeshing (uncomment)
     '''if len(ids) > NUM_CAPS:
         face_cells = []
         for idx in ids:
             face = model.get_face_polydata(idx)
             cells = face.GetNumberOfCells()
-            print(cells)
             face_cells.append(cells)
         data_to_remove = len(ids) - NUM_CAPS
         remove_list = []
         for i in range(data_to_remove):
             remove_list.append(ids[face_cells.index(min(face_cells))])
             face_cells[face_cells.index(min(face_cells))] += 1000
-        print(remove_list)
         while len(remove_list) > 0:
             target = walls[0]
             lose = remove_list.pop(-1)
             combined = sv.mesh_utils.remesh_faces(model.get_polydata(),[target],lose)
             model.set_surface(combined)
-            print(remove_list)
         print(model.get_face_ids())'''
+
     ###############################
     # LOCAL SMOOTHING (not included)
     ###############################
     #smoothing_params = {'method':'constrained', 'num_iterations':5, 'constrain_factor':0.2, 'num_cg_solves':30}
-    smooth_model = model.get_polydata()
+    '''smooth_model = model.get_polydata()
     for idx, contour_set in enumerate(contour_list):
          if idx == 0:
               continue
          smoothing_params = {'method':'constrained', 'num_iterations':3, 'constrain_factor':0.1+(0.9*(1-contour_set[0].get_radius()/contour_list[0][0].get_radius())), 'num_cg_solves':30}
          smooth_model = sv.geometry.local_sphere_smooth(smooth_model,contour_set[0].get_radius()*2,contour_set[0].get_center(),smoothing_params)
          print('local sphere smoothing {}'.format(idx))
-    model.set_surface(smooth_model)
+    model.set_surface(smooth_model)'''
 
     # [=== Create mesh ===]
     faces = model.get_face_ids()
@@ -204,7 +212,7 @@ def generate_model(args):
     if True:
         sv.dmg.add_mesh(cco8_model_name+'_mesh', msh, cco8_model_name)
 
-    return msh, model
+    return path, segmentations, model, msh
 
 
 
@@ -240,9 +248,9 @@ ranges = [
     (15.0, 15.0, 1.0),      # xf
     (31, 31, 2),            # nx - make this an odd number, so that we will have a segmentation at the midpoint
     (0, 0, 1),              # distance - for removal of segmentations surrounding the midsection
-    10**np.arange(-1,2.1,0.5),      # midsection_percentage - midsection area as a percentage of the inlet area (Logarithmic scale between 0.1% and 100%)
+    10**np.arange(-1,2.1,1),      # midsection_percentage - midsection area as a percentage of the inlet area (Logarithmic scale between 0.1% and 100%)
     (1.0, 1.0, 0.1),        # radius_inlet
-    (50, 100, 25),          # sigma - controls the spread of the stenosis/aneurysm
+    (50, 100, 50),          # sigma - controls the spread of the stenosis/aneurysm
     (0.0, 0.0, 0.25),       # mu - controls the center of the stenosis/aneurysm
     [poly],                    # f - Parametric function of x component
     [poly],                    # g - Parametric function of y component
@@ -251,12 +259,9 @@ ranges = [
     [(0, 0, 0, 1/1000),]          # inputs to g(t, ...)
 ]
 
-# REMOVEME: Keeps some variables static
-ranges[0] = [-15,]
-ranges[1] = [15,]
-ranges[4] = [1,]
-ranges[6] = (50,50,25)
-
+# test case
+'''ranges[4] = [1.0, ]
+ranges[6] = [50, ]'''
 
 def generate_simulation_inputs(range_index = (len(ranges)-1)):
     # Base case, no variables in list to generate combinations -- return empty list
@@ -285,26 +290,99 @@ def generate_simulation_inputs(range_index = (len(ranges)-1)):
                     arr_new = arr.copy()
                     arr_new.append(val)
                     yield arr_new
-            
+
+PICKLE_PROTOCOL = 4
     
+def generate_models(create=True, addDmg=True):
+    if create:
+        i = 1
+        fModelList = open(os.path.join(projDir, 'model_list.txt'), 'w')
+        # Generate inputs
+        for input_arr in generate_simulation_inputs():
+            # model_name, x0, xf, nx, distance, midsection_percentage, radius_inlet, sigma, mu, f, g, radius, f_params, g_params = input_arr
+            model_name = "model_{0}".format(i)
+
+            
+            args = (model_name, *input_arr)
+
+            try:
+                #  [=== Generate model ===]
+                # Create a new model (if possible)
+                path, segmentations, model, msh = generate_model(args)
+                print(input_arr)
+                
+                #  [=== Serialize model ===]
+                # Path
+                '''with open(os.path.join(pathsDir, model_name+'_pth.P'), 'wb') as f_out:
+                    pickle.dump(path, f_out, protocol=PICKLE_PROTOCOL)
+                # Segment
+                with open(os.path.join(segDir, model_name+'_sgmt.P'), 'wb') as f_out:
+                    pickle.dump(segmentations, f_out, protocol=PICKLE_PROTOCOL)'''
+                # Model
+                '''with open(os.path.join(modelsDir, model_name+'_mdl.P'), 'wb') as f_out:
+                    pickle.dump(model, f_out, protocol=PICKLE_PROTOCOL)
+                # Mesh
+                with open(os.path.join(meshDir, model_name+'_msh.P'), 'wb') as f_out:
+                    pickle.dump(msh, f_out, protocol=PICKLE_PROTOCOL)'''
+                model.write(os.path.join(modelsDir, model_name+'_mdl.vtp'), 'vtp')
+                msh.write(os.path.join(meshDir, model_name+'_msh.msh'))
+
+                #  [=== Log model configs in manifest file ===]
+                # Write params of model to file
+                buffStr = "%s %d %d\n" % (model_name, x0, xf)
+                fModelList.write(buffStr)
+                return
+
+                # Yield model
+                yield path, segmentations, model, msh
+            except sv.meshing.Error:
+                print("An error occured while creating mesh for %s" % model_name)
+            '''except:
+                print("An unknown error occured for %s" % model_name)
+                return'''
+            
+            fModelList.flush()
+            i += 1
+    else:
+        fModelList = open(os.path.join(projDir, 'model_list.txt'), 'r')
+        for row in fModelList:
+            # Read model configs from manifest file
+            model_Name, *config_arr = row.strip().split()
+            
+            # [=== Deserialize model ===]
+            # Path
+            # with open(os.path.join(pathsDir, model_name+'_pth.P'), 'rb') as f_in:
+                #path = pickle.load(f_in)
+            # Segment
+            # with open(os.path.join(segDir, model_name+'_sgmt.P'), 'rb') as f_in:
+                # segmentations = pickle.load(f_in)
+            # Model
+            model.write(model_name+'_mdl.P')
+            # with open(os.path.join(modelsDir, model_name+'_mdl.P'), 'rb') as f_in:
+                #model = pickle.load(f_in)
+                #model.write(f_in)
+            # Mesh
+            msh.write(model_name+'_msh.P')
+            # with open(os.path.join(meshDir, model_name+'_msh.P'), 'rb') as f_in:
+                #msh = pickle.load(f_in)
+                #msh.write(f_in)
+            
+            # [=== Add models to dmg ===]
+            if addDmg:
+                path_name = model_name + '_path'
+                sv.dmg.add_path(name = path_name, path = path)
+                segmentations_name = model_name + '_segmentations'
+                sv.dmg.add_segmentation(name = segmentations_name, path = path_name, segmentations = segmentations)
+                sv.dmg.add_model(name = model_name, model = model)
+                sv.dmg.add_mesh(model_name+'_mesh', msh, model_name)
+            
+            # Yield model
+            yield path, segmentations, model, msh
+
 def run_simulation():
-    i = 1
-    fModelList = open(os.path.join(projDir, 'model_list.txt'), 'w')
-    # Generate inputs
-    for input_arr in generate_simulation_inputs():
-        # model_name, x0, xf, nx, distance, midsection_percentage, radius_inlet, sigma, mu, f, g, radius, f_params, g_params = input_arr
-        model_name = "model_{0}".format(i)
-
-        # Write params of model to file
-        buffStr = "%s : %d, %d\n" % (model_name, x0, xf)
-        fModelList.write(buffStr);
-        
-        args = (model_name, *input_arr)
-
-        msh, model = generate_model(args)
-        
-        i += 1
-
+    for path, segmentations, model, msh in generate_models():
+        # Run simulation on models iteratively
+        pass
 
 run_simulation()
 
