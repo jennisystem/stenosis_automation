@@ -10,6 +10,7 @@ import pickle
 
 # Initialize path names
 projDir = "C:/Users/Emmaline/Desktop/Marsden Lab/stenosis_automation"
+# projDir = "D:/1_CS/jenn/stenosis"
 
 meshDir = os.path.join(projDir, 'mesh')
 modelsDir = os.path.join(projDir, 'model')
@@ -141,6 +142,7 @@ def generate_model(args):
     # model = sv.modeling.PolyData()
     model = clean(unioned_model)
     model = norm(model)
+    model = remesh(model, cell_density_mm=[10,1])
     tmp = model.get_polydata()
     sv.dmg.add_model(name = model_name + "_model", model = model)
 
@@ -211,6 +213,7 @@ def generate_model(args):
     msh = mesher.get_mesh()
     if True:
         sv.dmg.add_mesh(cco8_model_name+'_mesh', msh, cco8_model_name)
+        msh = sv.dmg.get_mesh(cco8_model_name+'_mesh')
 
     return path, segmentations, model, msh
 
@@ -259,9 +262,11 @@ ranges = [
     [(0, 0, 0, 1/1000),]          # inputs to g(t, ...)
 ]
 
+
 # test case
 '''ranges[4] = [1.0, ]
 ranges[6] = [50, ]'''
+
 
 def generate_simulation_inputs(range_index = (len(ranges)-1)):
     # Base case, no variables in list to generate combinations -- return empty list
@@ -324,14 +329,15 @@ def generate_models(create=True, addDmg=True):
                 # Mesh
                 with open(os.path.join(meshDir, model_name+'_msh.P'), 'wb') as f_out:
                     pickle.dump(msh, f_out, protocol=PICKLE_PROTOCOL)'''
-                model.write(os.path.join(modelsDir, model_name+'_mdl.vtp'), 'vtp')
-                msh.write(os.path.join(meshDir, model_name+'_msh.msh'))
+                model.write(os.path.join(modelsDir, model_name+'_mdl'), 'vtp')
+
+                # msh.get_polydata.write(os.path.join(meshDir, model_name+'_msh'))
+                # msh.write_mesh(os.path.join(meshDir, model_name+'_msh'))
 
                 #  [=== Log model configs in manifest file ===]
                 # Write params of model to file
                 buffStr = "%s %d %d\n" % (model_name, x0, xf)
                 fModelList.write(buffStr)
-                return
 
                 # Yield model
                 yield path, segmentations, model, msh
